@@ -34,6 +34,8 @@ const char *mqtt_username = "root";
 const char *mqtt_password = "orangepi.hass";
 const int mqtt_port = 1883;
 
+String client_id = "weatherstation-client-";
+
 // *********************************************************************************************************;
 
 WiFiClient espClient;
@@ -265,13 +267,14 @@ void setup()
   }
   Serial.println("Connected to the Wi-Fi network");
   // connecting to a mqtt broker
+  client.setKeepAlive(20860);
   client.setServer(mqtt_broker, mqtt_port);
   client.setCallback(callback);
 
   while (!client.connected())
   {
-    String client_id = "weatherstation-client-";
-    client_id += String(WiFi.macAddress());
+    // String client_id = "weatherstation-client-";
+    client_id = client_id + String(WiFi.macAddress());
     Serial.printf("The client %s connects to the public MQTT broker\n", client_id.c_str());
     if (client.connect(client_id.c_str(), mqtt_username, mqtt_password))
     {
@@ -427,7 +430,8 @@ void loop()
   if (now - lastMsg > 1000)
   { // Enviar telemetría cada 10 segundos
     lastMsg = now;
-
+    pixels.setPixelColor(0, pixels.Color(255, 20, 50));
+    pixels.show();
     // Aquí, pon el código para leer tu sensor
     Serial.println("********************  AHT10  **********************");
     char msgt[50];
@@ -619,7 +623,7 @@ void reconnect()
   {
     Serial.print("Intentando conexión MQTT...");
     // Intentar conectar
-    if (client.connect("WEATHERSTATIONClient"))
+    if (client.connect(client_id.c_str(), mqtt_username, mqtt_password))
     {
       Serial.println("conectado");
     }
@@ -823,26 +827,26 @@ void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2)
   {
     lastTVOC = TVOC;
     display.setCursor(0, 40);
-    display.println("TVOC: " + String(lastTVOC));
+    display.println("TVOC: " + String((int)lastTVOC));
     display.display();
   }
   else
   {
     display.setCursor(0, 40);
-    display.println("TVOC: " + String(TVOC));
+    display.println("TVOC: " + String((int)TVOC));
     display.display();
   }
   if (checkBound(ECO2, lastECO2, 1.0))
   {
     lastECO2 = ECO2;
     display.setCursor(0, 50);
-    display.println("ECO2: " + String(lastECO2));
+    display.println("ECO2: " + String((int)lastECO2));
     display.display();
   }
   else
   {
     display.setCursor(0, 50);
-    display.println("ECO2: " + String(ECO2));
+    display.println("ECO2: " + String((int)ECO2));
     display.display();
   }
   delay(2000);
@@ -944,14 +948,14 @@ void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, f
   else
   {
     display.setCursor(0, 40);
-    display.println("GT>5: "  + String(RawGreaterThan_5_0));
+    display.println("GT>5: " + String(RawGreaterThan_5_0));
     display.display();
   }
   if (checkBound(RawGreaterThan_10_0, lastRawGreaterThan_10_0, 1.0))
   {
     lastRawGreaterThan_10_0 = RawGreaterThan_10_0;
     display.setCursor(0, 50);
-    display.println("GT>10: "  + String(lastRawGreaterThan_10_0));
+    display.println("GT>10: " + String(lastRawGreaterThan_10_0));
     display.display();
   }
   else
