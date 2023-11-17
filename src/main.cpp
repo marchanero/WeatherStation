@@ -16,6 +16,13 @@
 
 #include <Adafruit_Sensor.h>
 
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 // WiFi
 const char *ssid = "DIGIFIBRA-cF5T";
 const char *password = "P92sKt3FGfsy";
@@ -71,6 +78,12 @@ DFRobot_MICS_ADC mics(/*adcPin*/ ADC_PIN, /*powerPin*/ POWER_PIN);
 // ENS160
 uint8_t csPin = 5;
 DFRobot_ENS160_SPI ENS160(&SPI, csPin);
+void displayAHT10(float newTempAHT10, float newHumAHT10);
+void displayAHT20(float newTempAHT20, float newHumAHT20);
+void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt);
+void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2);
+void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos, float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0);
+void displayMQTTerror(int mqttState);
 
 void setupAHT10()
 {
@@ -212,7 +225,24 @@ void setup()
   // Set software serial baud to 115200;
   Serial.begin(115200);
   // Connecting to a WiFi network
-  WiFi.mode(WIFI_STA); // Optional
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+  { // Address 0x3D for 128x64
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;)
+      ;
+  }
+  delay(2000);
+  display.clearDisplay();
+
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 5);
+  // Display static text
+  display.println("Weather Station");
+  display.display();
+
+  // WiFi
+  // WiFi.mode(WIFI_STA); // Optional
   WiFi.begin(ssid, password);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   Serial.println("\nConnecting");
@@ -221,6 +251,17 @@ void setup()
   {
     delay(500);
     Serial.println("Connecting to WiFi..");
+    // show in display oled
+    display.setCursor(0, 20);
+    display.println("Connecting to WiFi..");
+    display.display();
+    // create pixel blink in red color
+    pixels.setPixelColor(0, pixels.Color(0, 255, 0));
+    pixels.show();
+    delay(500);
+    // set the color of the led to off
+    pixels.setPixelColor(0, pixels.Color(0, 0, 0));
+    pixels.show();
   }
   Serial.println("Connected to the Wi-Fi network");
   // connecting to a mqtt broker
@@ -253,25 +294,65 @@ void setup()
   setupPMS7003();
 
   // client.subscribe(topic);
+  display.clearDisplay();
+  display.setCursor(0, 5);
+  // Display static text
+  display.println("Weather Station");
+  display.display();
+  display.setCursor(0, 20);
+  // Display static text
+  display.println("IP: " + WiFi.localIP().toString());
+  // display broker mqtt information
+  display.setCursor(0, 30);
+  display.println("MQTT: " + String(mqtt_broker));
+  display.setCursor(0, 40);
+
+  // display mqtt status
+  if (client.connected())
+  {
+    display.println("MQTT: Connected");
+  }
+  else
+  {
+    display.println("MQTT: Disconnected");
+  }
+  display.display();
+  delay(5000);
 }
 
-void callback(char *topic, byte *payload, unsigned int length)
-{
-  Serial.print("Message arrived in topic: ");
-  Serial.println(topic);
-  Serial.print("Message:");
-  for (int i = 0; i < length; i++)
-  {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-  Serial.println("-----------------------");
-}
+// variable para mostrar en pantalla
+float lastTempAHT10 = 0;
+float lastHumAHT10 = 0;
+float lastTempAHT20 = 0;
+float lastHumAHT20 = 0;
+float lastTempBMP = 0;
+float lastPres = 0;
+float lastBar = 0;
+float lastAlt = 0;
+float lastStatus = 0;
+float lastAQI = 0;
+float lastTVOC = 0;
+float lastECO2 = 0;
+
+float lastPM1_0 = 0;
+float lastPM2_5 = 0;
+float lastPM10_0 = 0;
+float lastPM1_0_atmos = 0;
+float lastPM2_5_atmos = 0;
+float lastPM10_0_atmos = 0;
+float lastRawGreaterThan_0_5 = 0;
+float lastRawGreaterThan_1_0 = 0;
+float lastRawGreaterThan_2_5 = 0;
+float lastRawGreaterThan_5_0 = 0;
+float lastRawGreaterThan_10_0 = 0;
 
 void loop()
 {
+  // client.subscribe(topic);
+  // display.clearDisplay();
+  // display.display();
   // AHT10
-  float newTempAHT10 = myAHT10.readTemperature(AHT10_FORCE_READ_DATA)-3;
+  float newTempAHT10 = myAHT10.readTemperature(AHT10_FORCE_READ_DATA) - 3;
   float newHumAHT10 = myAHT10.readHumidity(AHT10_USE_READ_DATA);
 
   // AHT20
@@ -364,6 +445,7 @@ void loop()
 
     // Publicar el mensaje
     client.publish("weatherstation/humedadAHT10", msgh);
+    displayAHT10(newTempAHT10, newHumAHT10);
 
     Serial.println("********************  AHT20  **********************");
     char msgtAHT20[50];
@@ -377,6 +459,8 @@ void loop()
     Serial.print("Humedad AHT20: ");
     Serial.println(msghAHT20);
     client.publish("weatherstation/humedadAHT20", msghAHT20);
+
+    displayAHT20(newTempAHT20, newHumHT20);
 
     Serial.println("********************  BMP280  **********************");
     char msgtBMP[50];
@@ -404,8 +488,10 @@ void loop()
     Serial.println(msga);
     client.publish("weatherstation/altitudBMP", msga);
 
+    displayBMP280(newTempBMP, newPres, newBar, newAlt);
+
     Serial.println("********************  ENS160  **********************");
-    if (Status == 0 || (AQI < 6 || TVOC > 0 || ECO2 > 0))
+    if (Status == 0 && ((AQI != 0 && AQI < 6) || TVOC != 0 || ECO2 != 0))
     {
       pixels.setPixelColor(0, pixels.Color(255, 0, 0));
       pixels.show();
@@ -434,6 +520,7 @@ void loop()
       Serial.print("ECO2 ENS160: ");
       Serial.println(msgECO2);
       client.publish("weatherstation/ENS160/ECO2ENS160", msgECO2);
+      displayENS160(Status, AQI, TVOC, ECO2);
     }
     else
     {
@@ -512,13 +599,16 @@ void loop()
       Serial.print("RawGreaterThan_10_0 PMS7003: ");
       Serial.println(msgRawGreaterThan_10_0);
       client.publish("weatherstation/PMS7003/RawGreaterThan_10", msgRawGreaterThan_10_0);
+
+      displayPMS7003(PM1_0, PM2_5, PM10_0, PM1_0_atmos, PM2_5_atmos, PM10_0_atmos, RawGreaterThan_0_5, RawGreaterThan_1_0, RawGreaterThan_2_5, RawGreaterThan_5_0, RawGreaterThan_10_0);
     }
     else
     {
       Serial.println("No hay datos de PMS7003");
     }
+    // display data in oled
+    // use millis to display in oled
   }
-
   delay(1000);
 }
 
@@ -539,7 +629,8 @@ void reconnect()
       Serial.print(client.state());
       Serial.println(" intentar de nuevo en 5 segundos");
       // Esperar 5 segundos antes de volver a intentar
-      delay(5000);
+      displayMQTTerror(client.state());
+      delay(10000);
     }
   }
 }
@@ -547,4 +638,340 @@ void reconnect()
 bool checkBound(float newValue, float prevValue, float maxDiff)
 {
   return !isnan(newValue) && (newValue < prevValue - maxDiff || newValue > prevValue + maxDiff);
+}
+
+void callback(char *topic, byte *payload, unsigned int length)
+{
+  Serial.print("Message arrived in topic: ");
+  Serial.println(topic);
+  Serial.print("Message:");
+  for (int i = 0; i < length; i++)
+  {
+    Serial.print((char)payload[i]);
+  }
+  Serial.println();
+  Serial.println("-----------------------");
+}
+
+// Display every data in oled
+// display AHT10 data using global variable and checkBound function to set static text
+void displayAHT10(float newTempAHT10, float newHumAHT10)
+{
+  display.clearDisplay();
+  // display AHT10 data
+  display.setCursor(0, 5);
+  display.println("AHT10: ");
+  if (checkBound(newTempAHT10, lastTempAHT10, 1.0))
+  {
+    lastTempAHT10 = newTempAHT10;
+    display.setCursor(0, 20);
+    display.println("Temperatura: " + String(lastTempAHT10) + " ºC");
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 20);
+    display.println("Temperatura: " + String(newTempAHT10)) + " ºC";
+    display.display();
+  }
+  if (checkBound(newHumAHT10, lastHumAHT10, 1.0))
+  {
+    lastHumAHT10 = newHumAHT10;
+    display.setCursor(0, 35);
+    display.println("Humedad: " + String(lastHumAHT10)) + " %";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 35);
+    display.println("Humedad: " + String(newHumAHT10)) + " %";
+    display.display();
+  }
+  delay(1000);
+}
+
+// display AHT20 data using global variable and checkBound function to set static text
+void displayAHT20(float newTempAHT20, float newHumAHT20)
+{
+  display.clearDisplay();
+  // display AHT20 data
+  display.setCursor(0, 5);
+  display.println("AHT20: ");
+  if (checkBound(newTempAHT20, lastTempAHT20, 1.0))
+  {
+    lastTempAHT20 = newTempAHT20;
+    display.setCursor(0, 20);
+    display.println("Temperatura: " + String(lastTempAHT20) + " ºC");
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 20);
+    display.println("Temperatura: " + String(newTempAHT20)) + " ºC";
+    display.display();
+  }
+  if (checkBound(newHumAHT20, lastHumAHT20, 1.0))
+  {
+    lastHumAHT20 = newHumAHT20;
+    display.setCursor(0, 35);
+    display.println("Humedad: " + String(lastHumAHT20)) + " %";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 35);
+    display.println("Humedad: " + String(newHumAHT20)) + " %";
+    display.display();
+  }
+  delay(1000);
+}
+
+void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt)
+{
+  display.clearDisplay();
+  // display BMP280 data
+  display.setCursor(0, 5);
+  display.println("BMP280: ");
+  if (checkBound(newTempBMP, lastTempBMP, 1.0))
+  {
+    lastTempBMP = newTempBMP;
+    display.setCursor(0, 20);
+    display.println("Temp: " + String(lastTempBMP) + " ºC");
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 20);
+    display.println("Temp: " + String(newTempBMP)) + " ºC";
+    display.display();
+  }
+  if (checkBound(newPres, lastPres, 1.0))
+  {
+    lastPres = newPres;
+    display.setCursor(0, 30);
+    display.println("Presion: " + String(lastPres)) + " Pa";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 30);
+    display.println("Presion: " + String(newPres)) + " Pa";
+    display.display();
+  }
+  if (checkBound(newBar, lastBar, 1.0))
+  {
+    lastBar = newBar;
+    display.setCursor(0, 40);
+    display.println("Barometro: " + String(lastBar)) + " hPa";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 40);
+    display.println("Barometro: " + String(newBar)) + " hPa";
+    display.display();
+  }
+  if (checkBound(newAlt, lastAlt, 1.0))
+  {
+    lastAlt = newAlt;
+    display.setCursor(0, 50);
+    display.println("Altitud: " + String(lastAlt)) + " m";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 50);
+    display.println("Altitud: " + String(newAlt)) + " m";
+    display.display();
+  }
+  delay(1000);
+}
+
+void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2)
+{
+  display.clearDisplay();
+  // display ENS160 data
+  display.setCursor(0, 5);
+  display.println("ENS160: ");
+  if (checkBound(Status, lastStatus, 1.0))
+  {
+    lastStatus = Status;
+    display.setCursor(0, 20);
+    display.println("Status: " + String(lastStatus));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 20);
+    display.println("Status: " + String(Status));
+    display.display();
+  }
+  if (checkBound(AQI, lastAQI, 1.0))
+  {
+    lastAQI = AQI;
+    display.setCursor(0, 30);
+    display.println("AQI: " + String(lastAQI));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 30);
+    display.println("AQI: " + String(AQI));
+    display.display();
+  }
+  if (checkBound(TVOC, lastTVOC, 1.0))
+  {
+    lastTVOC = TVOC;
+    display.setCursor(0, 40);
+    display.println("TVOC: " + String(lastTVOC));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 40);
+    display.println("TVOC: " + String(TVOC));
+    display.display();
+  }
+  if (checkBound(ECO2, lastECO2, 1.0))
+  {
+    lastECO2 = ECO2;
+    display.setCursor(0, 50);
+    display.println("ECO2: " + String(lastECO2));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 50);
+    display.println("ECO2: " + String(ECO2));
+    display.display();
+  }
+  delay(2000);
+}
+
+void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos, float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0)
+{
+  display.clearDisplay();
+  // display PMS7003 data
+  display.setCursor(0, 5);
+  display.println("PMS7003: ");
+  if (checkBound(PM1_0, lastPM1_0, 1.0))
+  {
+    lastPM1_0 = PM1_0;
+    display.setCursor(0, 20);
+    display.println("PM1_0: " + String((int)lastPM1_0));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 20);
+    display.println("PM1_0: " + String((int)PM1_0));
+    display.display();
+  }
+  if (checkBound(PM2_5, lastPM2_5, 1.0))
+  {
+    lastPM2_5 = PM2_5;
+    display.setCursor(0, 30);
+    display.println("PM2_5: " + String((int)lastPM2_5));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 30);
+    display.println("PM2_5: " + String((int)PM2_5));
+    display.display();
+  }
+  if (checkBound(PM10_0, lastPM10_0, 1.0))
+  {
+    lastPM10_0 = PM10_0;
+    display.setCursor(0, 40);
+    display.println("PM10_0: " + String((int)lastPM10_0));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 40);
+    display.println("PM10_0: " + String((int)PM10_0));
+    display.display();
+  }
+  display.clearDisplay();
+  delay(3000);
+  if (checkBound(RawGreaterThan_0_5, lastRawGreaterThan_0_5, 1.0))
+  {
+    lastRawGreaterThan_0_5 = RawGreaterThan_0_5;
+    display.setCursor(0, 10);
+    display.println("GT>0.5: " + String(lastRawGreaterThan_0_5));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 10);
+    display.println("GT>0.5: " + String(RawGreaterThan_0_5));
+    display.display();
+  }
+  if (checkBound(RawGreaterThan_1_0, lastRawGreaterThan_1_0, 1.0))
+  {
+    lastRawGreaterThan_1_0 = RawGreaterThan_1_0;
+    display.setCursor(0, 20);
+    display.println("GT>1: " + String(lastRawGreaterThan_1_0));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 20);
+    display.println("GT>1: " + String(RawGreaterThan_1_0));
+    display.display();
+  }
+  if (checkBound(RawGreaterThan_2_5, lastRawGreaterThan_2_5, 1.0))
+  {
+    lastRawGreaterThan_2_5 = RawGreaterThan_2_5;
+    display.setCursor(0, 30);
+    display.println("GT>2.5: " + String(lastRawGreaterThan_2_5));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 30);
+    display.println("GT>2.5: " + String(RawGreaterThan_2_5));
+    display.display();
+  }
+  if (checkBound(RawGreaterThan_5_0, lastRawGreaterThan_5_0, 1.0))
+  {
+    lastRawGreaterThan_5_0 = RawGreaterThan_5_0;
+    display.setCursor(0, 40);
+    display.println("GT>5: " + String(lastRawGreaterThan_5_0));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 40);
+    display.println("GT>5: "  + String(RawGreaterThan_5_0));
+    display.display();
+  }
+  if (checkBound(RawGreaterThan_10_0, lastRawGreaterThan_10_0, 1.0))
+  {
+    lastRawGreaterThan_10_0 = RawGreaterThan_10_0;
+    display.setCursor(0, 50);
+    display.println("GT>10: "  + String(lastRawGreaterThan_10_0));
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 50);
+    display.println("GT>10: " + String(RawGreaterThan_10_0));
+    display.display();
+  }
+  delay(2000);
+}
+
+void displayMQTTerror(int mqtterror)
+{
+  display.clearDisplay();
+  display.setCursor(0, 5);
+  display.println("MQTT: ");
+  display.setCursor(0, 20);
+  display.println("Error: " + String(mqtterror));
+  display.setCursor(0, 30);
+  display.println("Reintentando...");
+  display.display();
+  delay(2000);
 }
