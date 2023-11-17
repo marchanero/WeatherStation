@@ -407,7 +407,7 @@ void setup()
   xTaskCreatePinnedToCore(
       loop2,  /* Function to implement the task */
       "loop", /* Name of the task */
-      10000,  /* Stack size in words */
+      1000,  /* Stack size in words */
       NULL,   /* Task input parameter */
       0,      /* Priority of the task */
       NULL,   /* Task handle. */
@@ -645,7 +645,7 @@ void loop()
     Serial.println("********************  ENS160  **********************");
     if (Status == 0 && ((AQI != 0 && AQI < 6) || TVOC != 0 || ECO2 != 0))
     {
-      pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+      pixels.setPixelColor(0, pixels.Color(0, 0, 255));
       pixels.show();
 
       // ENS160
@@ -767,8 +767,9 @@ void loop()
 }
 void reconnect()
 {
-  // Loop hasta que estemos reconectados
-  while (!client.connected())
+  int contador_error = 0;
+      // Loop hasta que estemos reconectados
+      while (!client.connected())
   {
     Serial.print("Intentando conexión MQTT...");
     // Intentar conectar
@@ -781,9 +782,17 @@ void reconnect()
       Serial.print("falló, rc=");
       Serial.print(client.state());
       Serial.println(" intentar de nuevo en 5 segundos");
+      pixels.setPixelColor(0, pixels.Color(255, 0, 250));
+      pixels.show();
       // Esperar 5 segundos antes de volver a intentar
       displayMQTTerror(client.state());
+
       delay(5000);
+      contador_error++;
+      if (contador_error > 10)
+      {
+        ESP.restart();
+      }
     }
   }
 }
