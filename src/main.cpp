@@ -18,11 +18,18 @@
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+
+//*********************************************** TEMT6000 ***********************************************************
+int temt6000Pin = A1; // define the temt6000Pin
+
+//*********************************************** OLED ***********************************************************
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+//*********************************************** Wifi and MQTT ***********************************************************
 // WiFi
 const char *ssid = "DIGIFIBRA-cF5T";
 const char *password = "P92sKt3FGfsy";
@@ -33,6 +40,8 @@ const char *topic = "emqx/weatherstation";
 const char *mqtt_username = "root";
 const char *mqtt_password = "orangepi.hass";
 const int mqtt_port = 1883;
+
+String client_id = "weatherstation-client-";
 
 // *********************************************************************************************************;
 
@@ -82,8 +91,12 @@ void displayAHT10(float newTempAHT10, float newHumAHT10);
 void displayAHT20(float newTempAHT20, float newHumAHT20);
 void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt);
 void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2);
-void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos, float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0);
+void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos);
+void displayPMS7003Greater(float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0);
 void displayMQTTerror(int mqttState);
+void displayLUZ(float light, int light_value, float lux);
+
+void loop2(void *pcParameters);
 
 void setupAHT10()
 {
@@ -217,10 +230,79 @@ void setupMICS()
   }
 }
 
+// variable para mostrar en pantalla
+float lastTempAHT10 = 0;
+float lastHumAHT10 = 0;
+float lastTempAHT20 = 0;
+float lastHumAHT20 = 0;
+float lastTempBMP = 0;
+float lastPres = 0;
+float lastBar = 0;
+float lastAlt = 0;
+float lastStatus = 0;
+float lastAQI = 0;
+float lastTVOC = 0;
+float lastECO2 = 0;
+
+float lastPM1_0 = 0;
+float lastPM2_5 = 0;
+float lastPM10_0 = 0;
+float lastPM1_0_atmos = 0;
+float lastPM2_5_atmos = 0;
+float lastPM10_0_atmos = 0;
+float lastRawGreaterThan_0_5 = 0;
+float lastRawGreaterThan_1_0 = 0;
+float lastRawGreaterThan_2_5 = 0;
+float lastRawGreaterThan_5_0 = 0;
+float lastRawGreaterThan_10_0 = 0;
+float light = 0;
+
+// Temt6000 light sensor
+int light_value = 0;
+float volts = 0;
+float amps = 0;
+float microamps = 0;
+float lux = 0;
+
+// AHT10
+float newTempAHT10 = 0;
+float newHumAHT10 = 0;
+
+// AHT20
+sensors_event_t humidity, temp;
+
+float newTempAHT20 = 0;
+float newHumHT20 = 0;
+
+// BMP280
+float newTempBMP = 0;
+float newPres = 0;
+float newBar = 0;
+float newAlt = 0;
+
+// ENS160
+uint8_t Status = 0;
+uint8_t AQI = 0;
+uint16_t TVOC = 0;
+uint16_t ECO2 = 0;
+
+float PM1_0 = 0;
+float PM2_5 = 0;
+float PM10_0 = 0;
+float PM1_0_atmos = 0;
+float PM2_5_atmos = 0;
+float PM10_0_atmos = 0;
+float RawGreaterThan_0_5 = 0;
+float RawGreaterThan_1_0 = 0;
+float RawGreaterThan_2_5 = 0;
+float RawGreaterThan_5_0 = 0;
+float RawGreaterThan_10_0 = 0;
+
 //*************************************************  SETUP  *******************************************************
 void setup()
 {
-  pixels.setBrightness(10);
+  pinMode(temt6000Pin, INPUT); // use a input pin to read the data
+  pixels.setBrightness(5);
 
   // Set software serial baud to 115200;
   Serial.begin(115200);
@@ -265,13 +347,14 @@ void setup()
   }
   Serial.println("Connected to the Wi-Fi network");
   // connecting to a mqtt broker
+  client.setKeepAlive(20860);
   client.setServer(mqtt_broker, mqtt_port);
   client.setCallback(callback);
 
   while (!client.connected())
   {
-    String client_id = "weatherstation-client-";
-    client_id += String(WiFi.macAddress());
+    // String client_id = "weatherstation-client-";
+    client_id = client_id + String(WiFi.macAddress());
     Serial.printf("The client %s connects to the public MQTT broker\n", client_id.c_str());
     if (client.connect(client_id.c_str(), mqtt_username, mqtt_password))
     {
@@ -286,6 +369,8 @@ void setup()
   }
   // Publish and subscribe
   client.publish(topic, "Hi, I'm WEATHERSTATION ^^");
+
+  Serial.println("TEMT6000: OK");
 
   setupAHT10();
   setupAHT20();
@@ -318,101 +403,153 @@ void setup()
   }
   display.display();
   delay(5000);
+
+  xTaskCreatePinnedToCore(
+      loop2,  /* Function to implement the task */
+      "loop", /* Name of the task */
+      1000,   /* Stack size in words */
+      NULL,   /* Task input parameter */
+      0,      /* Priority of the task */
+      NULL,   /* Task handle. */
+      1);     /* Core where the task should run */
 }
 
-// variable para mostrar en pantalla
-float lastTempAHT10 = 0;
-float lastHumAHT10 = 0;
-float lastTempAHT20 = 0;
-float lastHumAHT20 = 0;
-float lastTempBMP = 0;
-float lastPres = 0;
-float lastBar = 0;
-float lastAlt = 0;
-float lastStatus = 0;
-float lastAQI = 0;
-float lastTVOC = 0;
-float lastECO2 = 0;
+// create state machine to show the function to display in oled
+enum State
+{
+  AHT10s,
+  AHT20,
+  BMP280,
+  ENS160state,
+  PMS7003,
+  PMS7003G,
+  TEMT6000,
+};
 
-float lastPM1_0 = 0;
-float lastPM2_5 = 0;
-float lastPM10_0 = 0;
-float lastPM1_0_atmos = 0;
-float lastPM2_5_atmos = 0;
-float lastPM10_0_atmos = 0;
-float lastRawGreaterThan_0_5 = 0;
-float lastRawGreaterThan_1_0 = 0;
-float lastRawGreaterThan_2_5 = 0;
-float lastRawGreaterThan_5_0 = 0;
-float lastRawGreaterThan_10_0 = 0;
+State currentState = AHT10s;
+unsigned long lastDisplayTime = 0;
+const unsigned long displayInterval = 2000; // Intervalo de 5 segundos
 
+void loop2(void *pcParameters)
+{
+  while (true)
+  {
+    long now = millis();
+
+    // Verificar si ha pasado el tiempo necesario desde la última visualización
+    if (now - lastDisplayTime >= displayInterval)
+    {
+      lastDisplayTime = now;
+
+      // Actualizar el estado de la máquina de estados
+      switch (currentState)
+      {
+      case AHT10s:
+        displayAHT10(newTempAHT10, newHumAHT10);
+        currentState = AHT20;
+        break;
+      case AHT20:
+        displayAHT20(newTempAHT20, newHumHT20);
+        currentState = BMP280;
+        break;
+      case BMP280:
+        displayBMP280(newTempBMP, newPres, newBar, newAlt);
+        currentState = ENS160state;
+        break;
+      case ENS160state:
+        displayENS160(lastStatus, lastAQI, lastTVOC, lastECO2);
+        currentState = PMS7003;
+        break;
+      case PMS7003:
+        displayPMS7003(lastPM1_0, lastPM2_5, lastPM10_0, lastPM1_0_atmos, lastPM2_5_atmos, lastPM10_0_atmos);
+        currentState = PMS7003G;
+        break;
+      case PMS7003G:
+        displayPMS7003Greater(lastRawGreaterThan_0_5, lastRawGreaterThan_1_0, lastRawGreaterThan_2_5, lastRawGreaterThan_5_0, lastRawGreaterThan_10_0);
+        currentState = TEMT6000;
+        break;
+      case TEMT6000:
+        displayLUZ(light, light_value, lux);
+        currentState = AHT10s;
+        break;
+      default:
+        break;
+      }
+    }
+  }
+}
 void loop()
 {
-  // client.subscribe(topic);
-  // display.clearDisplay();
-  // display.display();
+  // Temt6000 light sensor
+  light_value = analogRead(temt6000Pin);
+  light = light_value * 0.0976; // percentage calculation
+  volts = light_value * (3.3 / 1024.0);
+  amps = volts / 10000.0;
+  microamps = amps * 1000000;
+  lux = microamps * 2.0;
+
   // AHT10
-  float newTempAHT10 = myAHT10.readTemperature(AHT10_FORCE_READ_DATA) - 3;
-  float newHumAHT10 = myAHT10.readHumidity(AHT10_USE_READ_DATA);
+  newTempAHT10 = myAHT10.readTemperature(AHT10_FORCE_READ_DATA) - 3;
+  newHumAHT10 = myAHT10.readHumidity(AHT10_USE_READ_DATA);
 
   // AHT20
-  sensors_event_t humidity, temp;
+  // sensors_event_t humidity, temp;
   aht.getEvent(&humidity, &temp);
 
-  float newTempAHT20 = temp.temperature - 3;
-  float newHumHT20 = humidity.relative_humidity;
+  newTempAHT20 = temp.temperature - 3;
+  newHumHT20 = humidity.relative_humidity;
 
   // BMP280
-  float newTempBMP = bmp.readTemperature() - 3;
-  float newPres = bmp.readPressure();
-  float newBar = bmp.readPressure() / 100;
-  float newAlt = bmp.readAltitude(1013.25);
+  newTempBMP = bmp.readTemperature() - 3;
+  newPres = bmp.readPressure();
+  newBar = bmp.readPressure() / 100;
+  newAlt = bmp.readAltitude(1013.25);
 
   // ENS160
-  uint8_t Status = ENS160.getENS160Status();
-  uint8_t AQI = ENS160.getAQI();
-  uint16_t TVOC = ENS160.getTVOC();
-  uint16_t ECO2 = ENS160.getECO2();
+  Status = ENS160.getENS160Status();
+  AQI = ENS160.getAQI();
+  TVOC = ENS160.getTVOC();
+  ECO2 = ENS160.getECO2();
 
-  float PM1_0 = 0;
-  float PM2_5 = 0;
-  float PM10_0 = 0;
-  float PM1_0_atmos = 0;
-  float PM2_5_atmos = 0;
-  float PM10_0_atmos = 0;
-  float RawGreaterThan_0_5 = 0;
-  float RawGreaterThan_1_0 = 0;
-  float RawGreaterThan_2_5 = 0;
-  float RawGreaterThan_5_0 = 0;
-  float RawGreaterThan_10_0 = 0;
+  PM1_0 = 0;
+  PM2_5 = 0;
+  PM10_0 = 0;
+  PM1_0_atmos = 0;
+  PM2_5_atmos = 0;
+  PM10_0_atmos = 0;
+  RawGreaterThan_0_5 = 0;
+  RawGreaterThan_1_0 = 0;
+  RawGreaterThan_2_5 = 0;
+  RawGreaterThan_5_0 = 0;
+  RawGreaterThan_10_0 = 0;
 
   pms7003.updateFrame();
 
   if (pms7003.hasNewData())
   {
-    float newPM1_0 = pms7003.getPM_1_0();
-    float newPM2_5 = pms7003.getPM_2_5();
-    float newPM10_0 = pms7003.getPM_10_0();
-    float newPM1_0_atmos = pms7003.getPM_1_0_atmos();
-    float newPM2_5_atmos = pms7003.getPM_2_5_atmos();
-    float newPM10_0_atmos = pms7003.getPM_10_0_atmos();
-    float newRawGreaterThan_0_5 = pms7003.getRawGreaterThan_0_5();
-    float newRawGreaterThan_1_0 = pms7003.getRawGreaterThan_1_0();
-    float newRawGreaterThan_2_5 = pms7003.getRawGreaterThan_2_5();
-    float newRawGreaterThan_5_0 = pms7003.getRawGreaterThan_5_0();
-    float newRawGreaterThan_10_0 = pms7003.getRawGreaterThan_10_0();
+    PM1_0 = pms7003.getPM_1_0();
+    PM2_5 = pms7003.getPM_2_5();
+    PM10_0 = pms7003.getPM_10_0();
+    PM1_0_atmos = pms7003.getPM_1_0_atmos();
+    PM2_5_atmos = pms7003.getPM_2_5_atmos();
+    PM10_0_atmos = pms7003.getPM_10_0_atmos();
+    RawGreaterThan_0_5 = pms7003.getRawGreaterThan_0_5();
+    RawGreaterThan_1_0 = pms7003.getRawGreaterThan_1_0();
+    RawGreaterThan_2_5 = pms7003.getRawGreaterThan_2_5();
+    RawGreaterThan_5_0 = pms7003.getRawGreaterThan_5_0();
+    RawGreaterThan_10_0 = pms7003.getRawGreaterThan_10_0();
 
-    PM1_0 = newPM1_0;
-    PM2_5 = newPM2_5;
-    PM10_0 = newPM10_0;
-    PM1_0_atmos = newPM1_0_atmos;
-    PM2_5_atmos = newPM2_5_atmos;
-    PM10_0_atmos = newPM10_0_atmos;
-    RawGreaterThan_0_5 = newRawGreaterThan_0_5;
-    RawGreaterThan_1_0 = newRawGreaterThan_1_0;
-    RawGreaterThan_2_5 = newRawGreaterThan_2_5;
-    RawGreaterThan_5_0 = newRawGreaterThan_5_0;
-    RawGreaterThan_10_0 = newRawGreaterThan_10_0;
+    lastPM1_0 = PM1_0;
+    lastPM2_5 = PM2_5;
+    lastPM10_0 = PM10_0;
+    lastPM1_0_atmos = PM1_0_atmos;
+    lastPM2_5_atmos = PM2_5_atmos;
+    lastPM10_0_atmos = PM10_0_atmos;
+    lastRawGreaterThan_0_5 = RawGreaterThan_0_5;
+    lastRawGreaterThan_1_0 = RawGreaterThan_1_0;
+    lastRawGreaterThan_2_5 = RawGreaterThan_2_5;
+    lastRawGreaterThan_5_0 = RawGreaterThan_5_0;
+    lastRawGreaterThan_10_0 = RawGreaterThan_10_0;
   }
 
   if (!client.connected())
@@ -427,6 +564,42 @@ void loop()
   if (now - lastMsg > 1000)
   { // Enviar telemetría cada 10 segundos
     lastMsg = now;
+    // disable pixels by night usin lux
+    if (lux < 15)
+    {
+      pixels.setBrightness(0);
+    }
+    else
+    {
+      pixels.setBrightness(10);
+    }
+    pixels.setPixelColor(0, pixels.Color(255, 20, 50));
+    pixels.show();
+
+    Serial.println("********************  TEMT6000  **********************");
+    char msgl[50];
+    snprintf(msgl, 50, "%.2f", light);
+    Serial.print("Luz: ");
+    Serial.println(msgl);
+    // Publicar el mensaje
+    client.publish("weatherstation/luz", msgl);
+
+    char msglRaw[50];
+    snprintf(msglRaw, 50, "%d", light_value);
+    Serial.print("Light Raw: ");
+    Serial.println(light_value);
+    // Publicar el mensaje
+    client.publish("weatherstation/luzRaw", msglRaw);
+
+    char msglux[50];
+    snprintf(msglux, 50, "%.2f", lux);
+    Serial.print("Luminance: ");
+    Serial.print(lux);
+    Serial.println(" lux");
+    // Publicar el mensaje
+    client.publish("weatherstation/luminance", msglux);
+
+    //
 
     // Aquí, pon el código para leer tu sensor
     Serial.println("********************  AHT10  **********************");
@@ -445,7 +618,7 @@ void loop()
 
     // Publicar el mensaje
     client.publish("weatherstation/humedadAHT10", msgh);
-    displayAHT10(newTempAHT10, newHumAHT10);
+    // displayAHT10(newTempAHT10, newHumAHT10);
 
     Serial.println("********************  AHT20  **********************");
     char msgtAHT20[50];
@@ -460,7 +633,7 @@ void loop()
     Serial.println(msghAHT20);
     client.publish("weatherstation/humedadAHT20", msghAHT20);
 
-    displayAHT20(newTempAHT20, newHumHT20);
+    // displayAHT20(newTempAHT20, newHumHT20);
 
     Serial.println("********************  BMP280  **********************");
     char msgtBMP[50];
@@ -488,12 +661,12 @@ void loop()
     Serial.println(msga);
     client.publish("weatherstation/altitudBMP", msga);
 
-    displayBMP280(newTempBMP, newPres, newBar, newAlt);
+    // displayBMP280(newTempBMP, newPres, newBar, newAlt);
 
     Serial.println("********************  ENS160  **********************");
     if (Status == 0 && ((AQI != 0 && AQI < 6) || TVOC != 0 || ECO2 != 0))
     {
-      pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+      pixels.setPixelColor(0, pixels.Color(0, 0, 255));
       pixels.show();
 
       // ENS160
@@ -502,25 +675,29 @@ void loop()
       Serial.print("Status ENS160: ");
       Serial.println(msgStatus);
       client.publish("weatherstation/ENS160/statusENS160", msgStatus);
+      lastStatus = Status;
 
       char msgAQI[50];
       snprintf(msgAQI, 50, "%d", AQI);
       Serial.print("AQI ENS160: ");
       Serial.println(msgAQI);
       client.publish("weatherstation/ENS160/AQIENS160", msgAQI);
+      lastAQI = AQI;
 
       char msgTVOC[50];
       snprintf(msgTVOC, 50, "%d", TVOC);
       Serial.print("TVOC ENS160: ");
       Serial.println(msgTVOC);
       client.publish("weatherstation/ENS160/TVOCENS160", msgTVOC);
+      lastTVOC = TVOC;
 
       char msgECO2[50];
       snprintf(msgECO2, 50, "%d", ECO2);
       Serial.print("ECO2 ENS160: ");
       Serial.println(msgECO2);
       client.publish("weatherstation/ENS160/ECO2ENS160", msgECO2);
-      displayENS160(Status, AQI, TVOC, ECO2);
+      lastECO2 = ECO2;
+      // displayENS160(Status, AQI, TVOC, ECO2);
     }
     else
     {
@@ -600,7 +777,7 @@ void loop()
       Serial.println(msgRawGreaterThan_10_0);
       client.publish("weatherstation/PMS7003/RawGreaterThan_10", msgRawGreaterThan_10_0);
 
-      displayPMS7003(PM1_0, PM2_5, PM10_0, PM1_0_atmos, PM2_5_atmos, PM10_0_atmos, RawGreaterThan_0_5, RawGreaterThan_1_0, RawGreaterThan_2_5, RawGreaterThan_5_0, RawGreaterThan_10_0);
+      // displayPMS7003(PM1_0, PM2_5, PM10_0, PM1_0_atmos, PM2_5_atmos, PM10_0_atmos, RawGreaterThan_0_5, RawGreaterThan_1_0, RawGreaterThan_2_5, RawGreaterThan_5_0, RawGreaterThan_10_0);
     }
     else
     {
@@ -608,38 +785,54 @@ void loop()
     }
     // display data in oled
     // use millis to display in oled
+    // displayLUZ(light, light_value, lux);
   }
-  delay(1000);
+  // delay(1000);
 }
-
 void reconnect()
 {
+  int contador_error = 0;
   // Loop hasta que estemos reconectados
   while (!client.connected())
   {
     Serial.print("Intentando conexión MQTT...");
     // Intentar conectar
-    if (client.connect("WEATHERSTATIONClient"))
+    if (client.connect(client_id.c_str(), mqtt_username, mqtt_password))
     {
       Serial.println("conectado");
     }
     else
     {
-      Serial.print("falló, rc=");
-      Serial.print(client.state());
-      Serial.println(" intentar de nuevo en 5 segundos");
+      Serial.print("COmunicacion MQTT falló, rc=");
+      Serial.println(client.state());
+      Serial.println("Intentar de nuevo en 5 segundos");
+
+      pixels.setBrightness(10);
+      pixels.setPixelColor(0, pixels.Color(0, 255, 0));
+      pixels.show();
+      delay(500);
+      // set the color of the led to off
+      pixels.setPixelColor(0, pixels.Color(0, 0, 0));
+      pixels.show();
       // Esperar 5 segundos antes de volver a intentar
       displayMQTTerror(client.state());
-      delay(10000);
+
+      delay(5000);
+      contador_error++;
+      if (contador_error > 10)
+      {
+        Serial.println("Reiniciando ESP");
+
+        ESP.restart();
+      }
+      Serial.println("Intento " + String(contador_error));
     }
   }
 }
-
 bool checkBound(float newValue, float prevValue, float maxDiff)
 {
   return !isnan(newValue) && (newValue < prevValue - maxDiff || newValue > prevValue + maxDiff);
 }
-
 void callback(char *topic, byte *payload, unsigned int length)
 {
   Serial.print("Message arrived in topic: ");
@@ -654,7 +847,6 @@ void callback(char *topic, byte *payload, unsigned int length)
 }
 
 // Display every data in oled
-// display AHT10 data using global variable and checkBound function to set static text
 void displayAHT10(float newTempAHT10, float newHumAHT10)
 {
   display.clearDisplay();
@@ -665,32 +857,30 @@ void displayAHT10(float newTempAHT10, float newHumAHT10)
   {
     lastTempAHT10 = newTempAHT10;
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(lastTempAHT10) + " ºC");
+    display.println("Temp: " + String(lastTempAHT10) + " C");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(newTempAHT10)) + " ºC";
+    display.println("Temp: " + String(newTempAHT10)) + " C";
     display.display();
   }
   if (checkBound(newHumAHT10, lastHumAHT10, 1.0))
   {
     lastHumAHT10 = newHumAHT10;
     display.setCursor(0, 35);
-    display.println("Humedad: " + String(lastHumAHT10)) + " %";
+    display.println("Hum: " + String(lastHumAHT10)) + " %";
     display.display();
   }
   else
   {
     display.setCursor(0, 35);
-    display.println("Humedad: " + String(newHumAHT10)) + " %";
+    display.println("Hum: " + String(newHumAHT10)) + " %";
     display.display();
   }
-  delay(1000);
+  // delay(1000);
 }
-
-// display AHT20 data using global variable and checkBound function to set static text
 void displayAHT20(float newTempAHT20, float newHumAHT20)
 {
   display.clearDisplay();
@@ -701,13 +891,13 @@ void displayAHT20(float newTempAHT20, float newHumAHT20)
   {
     lastTempAHT20 = newTempAHT20;
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(lastTempAHT20) + " ºC");
+    display.println("Temperatura: " + String(lastTempAHT20) + " C");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(newTempAHT20)) + " ºC";
+    display.println("Temperatura: " + String(newTempAHT20)) + " C";
     display.display();
   }
   if (checkBound(newHumAHT20, lastHumAHT20, 1.0))
@@ -723,9 +913,8 @@ void displayAHT20(float newTempAHT20, float newHumAHT20)
     display.println("Humedad: " + String(newHumAHT20)) + " %";
     display.display();
   }
-  delay(1000);
+  // delay(1000);
 }
-
 void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt)
 {
   display.clearDisplay();
@@ -736,13 +925,13 @@ void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt)
   {
     lastTempBMP = newTempBMP;
     display.setCursor(0, 20);
-    display.println("Temp: " + String(lastTempBMP) + " ºC");
+    display.println("Temp: " + String(lastTempBMP) + " C");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("Temp: " + String(newTempBMP)) + " ºC";
+    display.println("Temp: " + String(newTempBMP)) + " C";
     display.display();
   }
   if (checkBound(newPres, lastPres, 1.0))
@@ -784,9 +973,8 @@ void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt)
     display.println("Altitud: " + String(newAlt)) + " m";
     display.display();
   }
-  delay(1000);
+  // delay(1000);
 }
-
 void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2)
 {
   display.clearDisplay();
@@ -823,32 +1011,31 @@ void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2)
   {
     lastTVOC = TVOC;
     display.setCursor(0, 40);
-    display.println("TVOC: " + String(lastTVOC));
+    display.println("TVOC: " + String((int)lastTVOC));
     display.display();
   }
   else
   {
     display.setCursor(0, 40);
-    display.println("TVOC: " + String(TVOC));
+    display.println("TVOC: " + String((int)TVOC));
     display.display();
   }
   if (checkBound(ECO2, lastECO2, 1.0))
   {
     lastECO2 = ECO2;
     display.setCursor(0, 50);
-    display.println("ECO2: " + String(lastECO2));
+    display.println("ECO2: " + String((int)lastECO2));
     display.display();
   }
   else
   {
     display.setCursor(0, 50);
-    display.println("ECO2: " + String(ECO2));
+    display.println("ECO2: " + String((int)ECO2));
     display.display();
   }
-  delay(2000);
+  // delay(1000);
 }
-
-void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos, float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0)
+void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos)
 {
   display.clearDisplay();
   // display PMS7003 data
@@ -858,111 +1045,128 @@ void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, f
   {
     lastPM1_0 = PM1_0;
     display.setCursor(0, 20);
-    display.println("PM1_0: " + String((int)lastPM1_0));
+    display.println("PM 1.0: " + String((int)lastPM1_0) + " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("PM1_0: " + String((int)PM1_0));
+    display.println("PM 1.0: " + String((int)PM1_0) + " ug/m3");
     display.display();
   }
   if (checkBound(PM2_5, lastPM2_5, 1.0))
   {
     lastPM2_5 = PM2_5;
     display.setCursor(0, 30);
-    display.println("PM2_5: " + String((int)lastPM2_5));
+    display.println("PM 2.5: " + String((int)lastPM2_5) + " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 30);
-    display.println("PM2_5: " + String((int)PM2_5));
+    display.println("PM 2.5: " + String((int)PM2_5) + " ug/m3");
     display.display();
   }
   if (checkBound(PM10_0, lastPM10_0, 1.0))
   {
     lastPM10_0 = PM10_0;
     display.setCursor(0, 40);
-    display.println("PM10_0: " + String((int)lastPM10_0));
+    display.println("PM 10: " + String((int)lastPM10_0) + " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 40);
-    display.println("PM10_0: " + String((int)PM10_0));
+    display.println("PM 10: " + String((int)PM10_0) + " ug/m3");
     display.display();
   }
+}
+void displayPMS7003Greater(float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0)
+{
   display.clearDisplay();
-  delay(3000);
+  // delay(1000);
   if (checkBound(RawGreaterThan_0_5, lastRawGreaterThan_0_5, 1.0))
   {
     lastRawGreaterThan_0_5 = RawGreaterThan_0_5;
     display.setCursor(0, 10);
-    display.println("GT>0.5: " + String(lastRawGreaterThan_0_5));
+    display.println("GT>0.5: " + String(lastRawGreaterThan_0_5) + " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 10);
-    display.println("GT>0.5: " + String(RawGreaterThan_0_5));
+    display.println("GT>0.5: " + String(RawGreaterThan_0_5) + " ppl/m3");
     display.display();
   }
   if (checkBound(RawGreaterThan_1_0, lastRawGreaterThan_1_0, 1.0))
   {
     lastRawGreaterThan_1_0 = RawGreaterThan_1_0;
     display.setCursor(0, 20);
-    display.println("GT>1: " + String(lastRawGreaterThan_1_0));
+    display.println("GT>1: " + String(lastRawGreaterThan_1_0) + " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("GT>1: " + String(RawGreaterThan_1_0));
+    display.println("GT>1: " + String(RawGreaterThan_1_0) + " ppl/m3");
     display.display();
   }
   if (checkBound(RawGreaterThan_2_5, lastRawGreaterThan_2_5, 1.0))
   {
     lastRawGreaterThan_2_5 = RawGreaterThan_2_5;
     display.setCursor(0, 30);
-    display.println("GT>2.5: " + String(lastRawGreaterThan_2_5));
+    display.println("GT>2.5: " + String(lastRawGreaterThan_2_5) + " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 30);
-    display.println("GT>2.5: " + String(RawGreaterThan_2_5));
+    display.println("GT>2.5: " + String(RawGreaterThan_2_5) + " ppl/m3");
     display.display();
   }
   if (checkBound(RawGreaterThan_5_0, lastRawGreaterThan_5_0, 1.0))
   {
     lastRawGreaterThan_5_0 = RawGreaterThan_5_0;
     display.setCursor(0, 40);
-    display.println("GT>5: " + String(lastRawGreaterThan_5_0));
+    display.println("GT>5: " + String(lastRawGreaterThan_5_0) + " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 40);
-    display.println("GT>5: "  + String(RawGreaterThan_5_0));
+    display.println("GT>5: " + String(RawGreaterThan_5_0) + " ppl/m3");
     display.display();
   }
   if (checkBound(RawGreaterThan_10_0, lastRawGreaterThan_10_0, 1.0))
   {
     lastRawGreaterThan_10_0 = RawGreaterThan_10_0;
     display.setCursor(0, 50);
-    display.println("GT>10: "  + String(lastRawGreaterThan_10_0));
+    display.println("GT>10: " + String(lastRawGreaterThan_10_0) + " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 50);
-    display.println("GT>10: " + String(RawGreaterThan_10_0));
+    display.println("GT>10: " + String(RawGreaterThan_10_0) + " ppl/m3");
     display.display();
   }
-  delay(2000);
+  // delay(1000);
 }
-
+void displayLUZ(float light, int light_value, float lux)
+{
+  display.clearDisplay();
+  // display LUZ data
+  display.setCursor(0, 5);
+  display.println("LUZ: ");
+  display.setCursor(0, 25);
+  display.println("Luz: " + String(light) + " %");
+  display.setCursor(0, 35);
+  display.println("Luz Raw: " + String(light_value));
+  display.setCursor(0, 45);
+  display.println("Luminance: " + String(lux) + " lux");
+  display.display();
+  // delay(1000);
+}
 void displayMQTTerror(int mqtterror)
 {
   display.clearDisplay();
