@@ -302,7 +302,7 @@ float RawGreaterThan_10_0 = 0;
 void setup()
 {
   pinMode(temt6000Pin, INPUT); // use a input pin to read the data
-  pixels.setBrightness(10);
+  pixels.setBrightness(5);
 
   // Set software serial baud to 115200;
   Serial.begin(115200);
@@ -407,7 +407,7 @@ void setup()
   xTaskCreatePinnedToCore(
       loop2,  /* Function to implement the task */
       "loop", /* Name of the task */
-      1000,  /* Stack size in words */
+      1000,   /* Stack size in words */
       NULL,   /* Task input parameter */
       0,      /* Priority of the task */
       NULL,   /* Task handle. */
@@ -428,7 +428,7 @@ enum State
 
 State currentState = AHT10s;
 unsigned long lastDisplayTime = 0;
-const unsigned long displayInterval = 3000; // Intervalo de 5 segundos
+const unsigned long displayInterval = 2000; // Intervalo de 5 segundos
 
 void loop2(void *pcParameters)
 {
@@ -457,15 +457,15 @@ void loop2(void *pcParameters)
         currentState = ENS160state;
         break;
       case ENS160state:
-        displayENS160(Status, AQI, TVOC, ECO2);
+        displayENS160(lastStatus, lastAQI, lastTVOC, lastECO2);
         currentState = PMS7003;
         break;
       case PMS7003:
-        displayPMS7003(PM1_0, PM2_5, PM10_0, PM1_0_atmos, PM2_5_atmos, PM10_0_atmos);
+        displayPMS7003(lastPM1_0, lastPM2_5, lastPM10_0, lastPM1_0_atmos, lastPM2_5_atmos, lastPM10_0_atmos);
         currentState = PMS7003G;
         break;
       case PMS7003G:
-        displayPMS7003Greater(RawGreaterThan_0_5, RawGreaterThan_1_0, RawGreaterThan_2_5, RawGreaterThan_5_0, RawGreaterThan_10_0);
+        displayPMS7003Greater(lastRawGreaterThan_0_5, lastRawGreaterThan_1_0, lastRawGreaterThan_2_5, lastRawGreaterThan_5_0, lastRawGreaterThan_10_0);
         currentState = TEMT6000;
         break;
       case TEMT6000:
@@ -538,6 +538,18 @@ void loop()
     RawGreaterThan_2_5 = pms7003.getRawGreaterThan_2_5();
     RawGreaterThan_5_0 = pms7003.getRawGreaterThan_5_0();
     RawGreaterThan_10_0 = pms7003.getRawGreaterThan_10_0();
+
+    lastPM1_0 = PM1_0;
+    lastPM2_5 = PM2_5;
+    lastPM10_0 = PM10_0;
+    lastPM1_0_atmos = PM1_0_atmos;
+    lastPM2_5_atmos = PM2_5_atmos;
+    lastPM10_0_atmos = PM10_0_atmos;
+    lastRawGreaterThan_0_5 = RawGreaterThan_0_5;
+    lastRawGreaterThan_1_0 = RawGreaterThan_1_0;
+    lastRawGreaterThan_2_5 = RawGreaterThan_2_5;
+    lastRawGreaterThan_5_0 = RawGreaterThan_5_0;
+    lastRawGreaterThan_10_0 = RawGreaterThan_10_0;
   }
 
   if (!client.connected())
@@ -552,6 +564,15 @@ void loop()
   if (now - lastMsg > 1000)
   { // Enviar telemetría cada 10 segundos
     lastMsg = now;
+    // disable pixels by night usin lux
+    if (lux < 15)
+    {
+      pixels.setBrightness(0);
+    }
+    else
+    {
+      pixels.setBrightness(10);
+    }
     pixels.setPixelColor(0, pixels.Color(255, 20, 50));
     pixels.show();
 
@@ -654,25 +675,28 @@ void loop()
       Serial.print("Status ENS160: ");
       Serial.println(msgStatus);
       client.publish("weatherstation/ENS160/statusENS160", msgStatus);
+      lastStatus = Status;
 
       char msgAQI[50];
       snprintf(msgAQI, 50, "%d", AQI);
       Serial.print("AQI ENS160: ");
       Serial.println(msgAQI);
       client.publish("weatherstation/ENS160/AQIENS160", msgAQI);
+      lastAQI = AQI;
 
       char msgTVOC[50];
       snprintf(msgTVOC, 50, "%d", TVOC);
       Serial.print("TVOC ENS160: ");
       Serial.println(msgTVOC);
       client.publish("weatherstation/ENS160/TVOCENS160", msgTVOC);
+      lastTVOC = TVOC;
 
       char msgECO2[50];
       snprintf(msgECO2, 50, "%d", ECO2);
       Serial.print("ECO2 ENS160: ");
       Serial.println(msgECO2);
       client.publish("weatherstation/ENS160/ECO2ENS160", msgECO2);
-
+      lastECO2 = ECO2;
       // displayENS160(Status, AQI, TVOC, ECO2);
     }
     else
@@ -768,8 +792,8 @@ void loop()
 void reconnect()
 {
   int contador_error = 0;
-      // Loop hasta que estemos reconectados
-      while (!client.connected())
+  // Loop hasta que estemos reconectados
+  while (!client.connected())
   {
     Serial.print("Intentando conexión MQTT...");
     // Intentar conectar
@@ -779,10 +803,16 @@ void reconnect()
     }
     else
     {
-      Serial.print("falló, rc=");
-      Serial.print(client.state());
-      Serial.println(" intentar de nuevo en 5 segundos");
-      pixels.setPixelColor(0, pixels.Color(255, 0, 250));
+      Serial.print("COmunicacion MQTT falló, rc=");
+      Serial.println(client.state());
+      Serial.println("Intentar de nuevo en 5 segundos");
+
+      pixels.setBrightness(10);
+      pixels.setPixelColor(0, pixels.Color(0, 255, 0));
+      pixels.show();
+      delay(500);
+      // set the color of the led to off
+      pixels.setPixelColor(0, pixels.Color(0, 0, 0));
       pixels.show();
       // Esperar 5 segundos antes de volver a intentar
       displayMQTTerror(client.state());
@@ -791,8 +821,11 @@ void reconnect()
       contador_error++;
       if (contador_error > 10)
       {
+        Serial.println("Reiniciando ESP");
+
         ESP.restart();
       }
+      Serial.println("Intento " + String(contador_error));
     }
   }
 }
