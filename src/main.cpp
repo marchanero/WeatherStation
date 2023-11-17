@@ -18,11 +18,18 @@
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+
+//*********************************************** TEMT6000 ***********************************************************
+int temt6000Pin = A1; // define the temt6000Pin
+
+//*********************************************** OLED ***********************************************************
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+//*********************************************** Wifi and MQTT ***********************************************************
 // WiFi
 const char *ssid = "DIGIFIBRA-cF5T";
 const char *password = "P92sKt3FGfsy";
@@ -86,6 +93,7 @@ void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt);
 void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2);
 void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos, float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0);
 void displayMQTTerror(int mqttState);
+void displayLUZ(float light, int light_value, float lux);
 
 void setupAHT10()
 {
@@ -222,6 +230,7 @@ void setupMICS()
 //*************************************************  SETUP  *******************************************************
 void setup()
 {
+  pinMode(temt6000Pin, INPUT); // use a input pin to read the data
   pixels.setBrightness(10);
 
   // Set software serial baud to 115200;
@@ -290,6 +299,7 @@ void setup()
   // Publish and subscribe
   client.publish(topic, "Hi, I'm WEATHERSTATION ^^");
 
+  Serial.println("TEMT6000: OK");
   setupAHT10();
   setupAHT20();
   setupBMP280();
@@ -348,12 +358,22 @@ float lastRawGreaterThan_1_0 = 0;
 float lastRawGreaterThan_2_5 = 0;
 float lastRawGreaterThan_5_0 = 0;
 float lastRawGreaterThan_10_0 = 0;
+float light = 0;
 
 void loop()
 {
   // client.subscribe(topic);
   // display.clearDisplay();
   // display.display();
+
+  // Temt6000 light sensor
+  int light_value = analogRead(temt6000Pin);
+  light = light_value * 0.0976; // percentage calculation
+  float volts = light_value * (3.3 / 1024.0);
+  float amps = volts / 10000.0;
+  float microamps = amps * 1000000;
+  float lux = microamps * 2.0;
+
   // AHT10
   float newTempAHT10 = myAHT10.readTemperature(AHT10_FORCE_READ_DATA) - 3;
   float newHumAHT10 = myAHT10.readHumidity(AHT10_USE_READ_DATA);
@@ -432,6 +452,32 @@ void loop()
     lastMsg = now;
     pixels.setPixelColor(0, pixels.Color(255, 20, 50));
     pixels.show();
+
+    Serial.println("********************  TEMT6000  **********************");
+    char msgl[50];
+    snprintf(msgl, 50, "%.2f", light);
+    Serial.print("Luz: ");
+    Serial.println(msgl);
+    // Publicar el mensaje
+    client.publish("weatherstation/luz", msgl);
+
+    char msglRaw[50];
+    snprintf(msglRaw, 50, "%d", light_value);
+    Serial.print("Light Raw: ");
+    Serial.println(light_value);
+    // Publicar el mensaje
+    client.publish("weatherstation/luzRaw", msglRaw);
+
+    char msglux[50];
+    snprintf(msglux, 50, "%.2f", lux);
+    Serial.print("Luminance: ");
+    Serial.print(lux);
+    Serial.println(" lux");
+    // Publicar el mensaje
+    client.publish("weatherstation/luminance", msglux);
+
+    //
+
     // Aquí, pon el código para leer tu sensor
     Serial.println("********************  AHT10  **********************");
     char msgt[50];
@@ -612,6 +658,7 @@ void loop()
     }
     // display data in oled
     // use millis to display in oled
+    displayLUZ(light, light_value, lux);
   }
   delay(1000);
 }
@@ -634,7 +681,7 @@ void reconnect()
       Serial.println(" intentar de nuevo en 5 segundos");
       // Esperar 5 segundos antes de volver a intentar
       displayMQTTerror(client.state());
-      delay(10000);
+      delay(5000);
     }
   }
 }
@@ -669,13 +716,13 @@ void displayAHT10(float newTempAHT10, float newHumAHT10)
   {
     lastTempAHT10 = newTempAHT10;
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(lastTempAHT10) + " ºC");
+    display.println("Temperatura: " + String(lastTempAHT10) + " C");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(newTempAHT10)) + " ºC";
+    display.println("Temperatura: " + String(newTempAHT10)) + " C";
     display.display();
   }
   if (checkBound(newHumAHT10, lastHumAHT10, 1.0))
@@ -705,13 +752,13 @@ void displayAHT20(float newTempAHT20, float newHumAHT20)
   {
     lastTempAHT20 = newTempAHT20;
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(lastTempAHT20) + " ºC");
+    display.println("Temperatura: " + String(lastTempAHT20) + " C");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(newTempAHT20)) + " ºC";
+    display.println("Temperatura: " + String(newTempAHT20)) + " C";
     display.display();
   }
   if (checkBound(newHumAHT20, lastHumAHT20, 1.0))
@@ -740,13 +787,13 @@ void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt)
   {
     lastTempBMP = newTempBMP;
     display.setCursor(0, 20);
-    display.println("Temp: " + String(lastTempBMP) + " ºC");
+    display.println("Temp: " + String(lastTempBMP) + " C");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("Temp: " + String(newTempBMP)) + " ºC";
+    display.println("Temp: " + String(newTempBMP)) + " C";
     display.display();
   }
   if (checkBound(newPres, lastPres, 1.0))
@@ -849,7 +896,7 @@ void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2)
     display.println("ECO2: " + String((int)ECO2));
     display.display();
   }
-  delay(2000);
+  delay(1000);
 }
 
 void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos, float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0)
@@ -862,111 +909,126 @@ void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, f
   {
     lastPM1_0 = PM1_0;
     display.setCursor(0, 20);
-    display.println("PM1_0: " + String((int)lastPM1_0));
+    display.println("PM1_0: " + String((int)lastPM1_0)+ " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("PM1_0: " + String((int)PM1_0));
+    display.println("PM1_0: " + String((int)PM1_0) + " ug/m3");
     display.display();
   }
   if (checkBound(PM2_5, lastPM2_5, 1.0))
   {
     lastPM2_5 = PM2_5;
     display.setCursor(0, 30);
-    display.println("PM2_5: " + String((int)lastPM2_5));
+    display.println("PM2_5: " + String((int)lastPM2_5)+ " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 30);
-    display.println("PM2_5: " + String((int)PM2_5));
+    display.println("PM2_5: " + String((int)PM2_5)+ " ug/m3");
     display.display();
   }
   if (checkBound(PM10_0, lastPM10_0, 1.0))
   {
     lastPM10_0 = PM10_0;
     display.setCursor(0, 40);
-    display.println("PM10_0: " + String((int)lastPM10_0));
+    display.println("PM10_0: " + String((int)lastPM10_0)+ " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 40);
-    display.println("PM10_0: " + String((int)PM10_0));
+    display.println("PM10_0: " + String((int)PM10_0)+ " ug/m3");
     display.display();
   }
   display.clearDisplay();
-  delay(3000);
+  delay(1000);
   if (checkBound(RawGreaterThan_0_5, lastRawGreaterThan_0_5, 1.0))
   {
     lastRawGreaterThan_0_5 = RawGreaterThan_0_5;
     display.setCursor(0, 10);
-    display.println("GT>0.5: " + String(lastRawGreaterThan_0_5));
+    display.println("GT>0.5: " + String(lastRawGreaterThan_0_5)+ " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 10);
-    display.println("GT>0.5: " + String(RawGreaterThan_0_5));
+    display.println("GT>0.5: " + String(RawGreaterThan_0_5) + " ppl/m3");
     display.display();
   }
   if (checkBound(RawGreaterThan_1_0, lastRawGreaterThan_1_0, 1.0))
   {
     lastRawGreaterThan_1_0 = RawGreaterThan_1_0;
     display.setCursor(0, 20);
-    display.println("GT>1: " + String(lastRawGreaterThan_1_0));
+    display.println("GT>1: " + String(lastRawGreaterThan_1_0)+ " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("GT>1: " + String(RawGreaterThan_1_0));
+    display.println("GT>1: " + String(RawGreaterThan_1_0)+ " ppl/m3");
     display.display();
   }
   if (checkBound(RawGreaterThan_2_5, lastRawGreaterThan_2_5, 1.0))
   {
     lastRawGreaterThan_2_5 = RawGreaterThan_2_5;
     display.setCursor(0, 30);
-    display.println("GT>2.5: " + String(lastRawGreaterThan_2_5));
+    display.println("GT>2.5: " + String(lastRawGreaterThan_2_5)+ " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 30);
-    display.println("GT>2.5: " + String(RawGreaterThan_2_5));
+    display.println("GT>2.5: " + String(RawGreaterThan_2_5)+ " ppl/m3");
     display.display();
   }
   if (checkBound(RawGreaterThan_5_0, lastRawGreaterThan_5_0, 1.0))
   {
     lastRawGreaterThan_5_0 = RawGreaterThan_5_0;
     display.setCursor(0, 40);
-    display.println("GT>5: " + String(lastRawGreaterThan_5_0));
+    display.println("GT>5: " + String(lastRawGreaterThan_5_0)+ " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 40);
-    display.println("GT>5: " + String(RawGreaterThan_5_0));
+    display.println("GT>5: " + String(RawGreaterThan_5_0)+ " ppl/m3");
     display.display();
   }
   if (checkBound(RawGreaterThan_10_0, lastRawGreaterThan_10_0, 1.0))
   {
     lastRawGreaterThan_10_0 = RawGreaterThan_10_0;
     display.setCursor(0, 50);
-    display.println("GT>10: " + String(lastRawGreaterThan_10_0));
+    display.println("GT>10: " + String(lastRawGreaterThan_10_0)+ " ppl/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 50);
-    display.println("GT>10: " + String(RawGreaterThan_10_0));
+    display.println("GT>10: " + String(RawGreaterThan_10_0)+ " ppl/m3");
     display.display();
   }
   delay(2000);
 }
 
+void displayLUZ(float light,  int light_value, float lux)
+{
+  display.clearDisplay();
+  // display LUZ data
+  display.setCursor(0, 5);
+  display.println("LUZ: ");
+  display.setCursor(0, 25);
+  display.println("Luz: " + String(light) + " %");
+  display.setCursor(0, 35);
+  display.println("Luz Raw: " + String(light_value));
+  display.setCursor(0, 45);
+  display.println("Luminance: " + String(lux) + " lux");
+  display.display();
+  delay(1000);
+}
 void displayMQTTerror(int mqtterror)
 {
   display.clearDisplay();
