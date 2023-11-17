@@ -91,7 +91,8 @@ void displayAHT10(float newTempAHT10, float newHumAHT10);
 void displayAHT20(float newTempAHT20, float newHumAHT20);
 void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt);
 void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2);
-void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos, float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0);
+void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos);
+void displayPMS7003Greater(float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0);
 void displayMQTTerror(int mqttState);
 void displayLUZ(float light, int light_value, float lux);
 
@@ -256,6 +257,47 @@ float lastRawGreaterThan_5_0 = 0;
 float lastRawGreaterThan_10_0 = 0;
 float light = 0;
 
+// Temt6000 light sensor
+int light_value = 0;
+float volts = 0;
+float amps = 0;
+float microamps = 0;
+float lux = 0;
+
+// AHT10
+float newTempAHT10 = 0;
+float newHumAHT10 = 0;
+
+// AHT20
+sensors_event_t humidity, temp;
+
+float newTempAHT20 = 0;
+float newHumHT20 = 0;
+
+// BMP280
+float newTempBMP = 0;
+float newPres = 0;
+float newBar = 0;
+float newAlt = 0;
+
+// ENS160
+uint8_t Status = 0;
+uint8_t AQI = 0;
+uint16_t TVOC = 0;
+uint16_t ECO2 = 0;
+
+float PM1_0 = 0;
+float PM2_5 = 0;
+float PM10_0 = 0;
+float PM1_0_atmos = 0;
+float PM2_5_atmos = 0;
+float PM10_0_atmos = 0;
+float RawGreaterThan_0_5 = 0;
+float RawGreaterThan_1_0 = 0;
+float RawGreaterThan_2_5 = 0;
+float RawGreaterThan_5_0 = 0;
+float RawGreaterThan_10_0 = 0;
+
 //*************************************************  SETUP  *******************************************************
 void setup()
 {
@@ -372,108 +414,130 @@ void setup()
       1);     /* Core where the task should run */
 }
 
-int counter = 0;
+// create state machine to show the function to display in oled
+enum State
+{
+  AHT10s,
+  AHT20,
+  BMP280,
+  ENS160state,
+  PMS7003,
+  PMS7003G,
+  TEMT6000,
+};
+
+State currentState = AHT10s;
+unsigned long lastDisplayTime = 0;
+const unsigned long displayInterval = 3000; // Intervalo de 5 segundos
+
 void loop2(void *pcParameters)
 {
   while (true)
   {
-    // pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-    // pixels.show();
-    // delay(1000);
-    // pixels.setPixelColor(0, pixels.Color(0, 255, 0));
-    // pixels.show();
-    // delay(1000);
-    // pixels.setPixelColor(0, pixels.Color(0, 0, 255));
-    // pixels.show();
-    // delay(1000);
-    display.clearDisplay();
-    display.setCursor(0, 5);
-    // Display static text
-    display.println("Multitasking");
-    display.setCursor(0, 20);
-    // Display static text
-    display.println(counter);
-    display.display();
-    counter=counter+1;
+    long now = millis();
+
+    // Verificar si ha pasado el tiempo necesario desde la última visualización
+    if (now - lastDisplayTime >= displayInterval)
+    {
+      lastDisplayTime = now;
+
+      // Actualizar el estado de la máquina de estados
+      switch (currentState)
+      {
+      case AHT10s:
+        displayAHT10(newTempAHT10, newHumAHT10);
+        currentState = AHT20;
+        break;
+      case AHT20:
+        displayAHT20(newTempAHT20, newHumHT20);
+        currentState = BMP280;
+        break;
+      case BMP280:
+        displayBMP280(newTempBMP, newPres, newBar, newAlt);
+        currentState = ENS160state;
+        break;
+      case ENS160state:
+        displayENS160(Status, AQI, TVOC, ECO2);
+        currentState = PMS7003;
+        break;
+      case PMS7003:
+        displayPMS7003(PM1_0, PM2_5, PM10_0, PM1_0_atmos, PM2_5_atmos, PM10_0_atmos);
+        currentState = PMS7003G;
+        break;
+      case PMS7003G:
+        displayPMS7003Greater(RawGreaterThan_0_5, RawGreaterThan_1_0, RawGreaterThan_2_5, RawGreaterThan_5_0, RawGreaterThan_10_0);
+        currentState = TEMT6000;
+        break;
+      case TEMT6000:
+        displayLUZ(light, light_value, lux);
+        currentState = AHT10s;
+        break;
+      default:
+        break;
+      }
+    }
   }
 }
-
 void loop()
 {
-  // client.subscribe(topic);
-  // display.clearDisplay();
-  // display.display();
-
   // Temt6000 light sensor
-  int light_value = analogRead(temt6000Pin);
+  light_value = analogRead(temt6000Pin);
   light = light_value * 0.0976; // percentage calculation
-  float volts = light_value * (3.3 / 1024.0);
-  float amps = volts / 10000.0;
-  float microamps = amps * 1000000;
-  float lux = microamps * 2.0;
+  volts = light_value * (3.3 / 1024.0);
+  amps = volts / 10000.0;
+  microamps = amps * 1000000;
+  lux = microamps * 2.0;
 
   // AHT10
-  float newTempAHT10 = myAHT10.readTemperature(AHT10_FORCE_READ_DATA) - 3;
-  float newHumAHT10 = myAHT10.readHumidity(AHT10_USE_READ_DATA);
+  newTempAHT10 = myAHT10.readTemperature(AHT10_FORCE_READ_DATA) - 3;
+  newHumAHT10 = myAHT10.readHumidity(AHT10_USE_READ_DATA);
 
   // AHT20
-  sensors_event_t humidity, temp;
+  // sensors_event_t humidity, temp;
   aht.getEvent(&humidity, &temp);
 
-  float newTempAHT20 = temp.temperature - 3;
-  float newHumHT20 = humidity.relative_humidity;
+  newTempAHT20 = temp.temperature - 3;
+  newHumHT20 = humidity.relative_humidity;
 
   // BMP280
-  float newTempBMP = bmp.readTemperature() - 3;
-  float newPres = bmp.readPressure();
-  float newBar = bmp.readPressure() / 100;
-  float newAlt = bmp.readAltitude(1013.25);
+  newTempBMP = bmp.readTemperature() - 3;
+  newPres = bmp.readPressure();
+  newBar = bmp.readPressure() / 100;
+  newAlt = bmp.readAltitude(1013.25);
 
   // ENS160
-  uint8_t Status = ENS160.getENS160Status();
-  uint8_t AQI = ENS160.getAQI();
-  uint16_t TVOC = ENS160.getTVOC();
-  uint16_t ECO2 = ENS160.getECO2();
+  Status = ENS160.getENS160Status();
+  AQI = ENS160.getAQI();
+  TVOC = ENS160.getTVOC();
+  ECO2 = ENS160.getECO2();
 
-  float PM1_0 = 0;
-  float PM2_5 = 0;
-  float PM10_0 = 0;
-  float PM1_0_atmos = 0;
-  float PM2_5_atmos = 0;
-  float PM10_0_atmos = 0;
-  float RawGreaterThan_0_5 = 0;
-  float RawGreaterThan_1_0 = 0;
-  float RawGreaterThan_2_5 = 0;
-  float RawGreaterThan_5_0 = 0;
-  float RawGreaterThan_10_0 = 0;
+  PM1_0 = 0;
+  PM2_5 = 0;
+  PM10_0 = 0;
+  PM1_0_atmos = 0;
+  PM2_5_atmos = 0;
+  PM10_0_atmos = 0;
+  RawGreaterThan_0_5 = 0;
+  RawGreaterThan_1_0 = 0;
+  RawGreaterThan_2_5 = 0;
+  RawGreaterThan_5_0 = 0;
+  RawGreaterThan_10_0 = 0;
 
   pms7003.updateFrame();
 
   if (pms7003.hasNewData())
   {
-    float newPM1_0 = pms7003.getPM_1_0();
-    float newPM2_5 = pms7003.getPM_2_5();
-    float newPM10_0 = pms7003.getPM_10_0();
-    float newPM1_0_atmos = pms7003.getPM_1_0_atmos();
-    float newPM2_5_atmos = pms7003.getPM_2_5_atmos();
-    float newPM10_0_atmos = pms7003.getPM_10_0_atmos();
-    float newRawGreaterThan_0_5 = pms7003.getRawGreaterThan_0_5();
-    float newRawGreaterThan_1_0 = pms7003.getRawGreaterThan_1_0();
-    float newRawGreaterThan_2_5 = pms7003.getRawGreaterThan_2_5();
-    float newRawGreaterThan_5_0 = pms7003.getRawGreaterThan_5_0();
-    float newRawGreaterThan_10_0 = pms7003.getRawGreaterThan_10_0();
-
-    PM1_0 = newPM1_0;
-    PM2_5 = newPM2_5;
-    PM10_0 = newPM10_0;
-    PM1_0_atmos = newPM1_0_atmos;
-    PM2_5_atmos = newPM2_5_atmos;
-    PM10_0_atmos = newPM10_0_atmos;
-    RawGreaterThan_0_5 = newRawGreaterThan_0_5;
-    RawGreaterThan_1_0 = newRawGreaterThan_1_0;
-    RawGreaterThan_2_5 = newRawGreaterThan_2_5;
-    RawGreaterThan_5_0 = newRawGreaterThan_5_0;
-    RawGreaterThan_10_0 = newRawGreaterThan_10_0;
+    PM1_0 = pms7003.getPM_1_0();
+    PM2_5 = pms7003.getPM_2_5();
+    PM10_0 = pms7003.getPM_10_0();
+    PM1_0_atmos = pms7003.getPM_1_0_atmos();
+    PM2_5_atmos = pms7003.getPM_2_5_atmos();
+    PM10_0_atmos = pms7003.getPM_10_0_atmos();
+    RawGreaterThan_0_5 = pms7003.getRawGreaterThan_0_5();
+    RawGreaterThan_1_0 = pms7003.getRawGreaterThan_1_0();
+    RawGreaterThan_2_5 = pms7003.getRawGreaterThan_2_5();
+    RawGreaterThan_5_0 = pms7003.getRawGreaterThan_5_0();
+    RawGreaterThan_10_0 = pms7003.getRawGreaterThan_10_0();
   }
 
   if (!client.connected())
@@ -699,9 +763,8 @@ void loop()
     // use millis to display in oled
     // displayLUZ(light, light_value, lux);
   }
-  //delay(1000);
+  // delay(1000);
 }
-
 void reconnect()
 {
   // Loop hasta que estemos reconectados
@@ -724,12 +787,10 @@ void reconnect()
     }
   }
 }
-
 bool checkBound(float newValue, float prevValue, float maxDiff)
 {
   return !isnan(newValue) && (newValue < prevValue - maxDiff || newValue > prevValue + maxDiff);
 }
-
 void callback(char *topic, byte *payload, unsigned int length)
 {
   Serial.print("Message arrived in topic: ");
@@ -744,7 +805,6 @@ void callback(char *topic, byte *payload, unsigned int length)
 }
 
 // Display every data in oled
-// display AHT10 data using global variable and checkBound function to set static text
 void displayAHT10(float newTempAHT10, float newHumAHT10)
 {
   display.clearDisplay();
@@ -755,32 +815,30 @@ void displayAHT10(float newTempAHT10, float newHumAHT10)
   {
     lastTempAHT10 = newTempAHT10;
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(lastTempAHT10) + " C");
+    display.println("Temp: " + String(lastTempAHT10) + " C");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("Temperatura: " + String(newTempAHT10)) + " C";
+    display.println("Temp: " + String(newTempAHT10)) + " C";
     display.display();
   }
   if (checkBound(newHumAHT10, lastHumAHT10, 1.0))
   {
     lastHumAHT10 = newHumAHT10;
     display.setCursor(0, 35);
-    display.println("Humedad: " + String(lastHumAHT10)) + " %";
+    display.println("Hum: " + String(lastHumAHT10)) + " %";
     display.display();
   }
   else
   {
     display.setCursor(0, 35);
-    display.println("Humedad: " + String(newHumAHT10)) + " %";
+    display.println("Hum: " + String(newHumAHT10)) + " %";
     display.display();
   }
-  delay(1000);
+  // delay(1000);
 }
-
-// display AHT20 data using global variable and checkBound function to set static text
 void displayAHT20(float newTempAHT20, float newHumAHT20)
 {
   display.clearDisplay();
@@ -813,9 +871,8 @@ void displayAHT20(float newTempAHT20, float newHumAHT20)
     display.println("Humedad: " + String(newHumAHT20)) + " %";
     display.display();
   }
-  delay(1000);
+  // delay(1000);
 }
-
 void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt)
 {
   display.clearDisplay();
@@ -874,9 +931,8 @@ void displayBMP280(float newTempBMP, float newPres, float newBar, float newAlt)
     display.println("Altitud: " + String(newAlt)) + " m";
     display.display();
   }
-  delay(1000);
+  // delay(1000);
 }
-
 void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2)
 {
   display.clearDisplay();
@@ -935,10 +991,9 @@ void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2)
     display.println("ECO2: " + String((int)ECO2));
     display.display();
   }
-  delay(1000);
+  // delay(1000);
 }
-
-void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos, float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0)
+void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos)
 {
   display.clearDisplay();
   // display PMS7003 data
@@ -948,43 +1003,46 @@ void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, f
   {
     lastPM1_0 = PM1_0;
     display.setCursor(0, 20);
-    display.println("PM1_0: " + String((int)lastPM1_0) + " ug/m3");
+    display.println("PM 1.0: " + String((int)lastPM1_0) + " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 20);
-    display.println("PM1_0: " + String((int)PM1_0) + " ug/m3");
+    display.println("PM 1.0: " + String((int)PM1_0) + " ug/m3");
     display.display();
   }
   if (checkBound(PM2_5, lastPM2_5, 1.0))
   {
     lastPM2_5 = PM2_5;
     display.setCursor(0, 30);
-    display.println("PM2_5: " + String((int)lastPM2_5) + " ug/m3");
+    display.println("PM 2.5: " + String((int)lastPM2_5) + " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 30);
-    display.println("PM2_5: " + String((int)PM2_5) + " ug/m3");
+    display.println("PM 2.5: " + String((int)PM2_5) + " ug/m3");
     display.display();
   }
   if (checkBound(PM10_0, lastPM10_0, 1.0))
   {
     lastPM10_0 = PM10_0;
     display.setCursor(0, 40);
-    display.println("PM10_0: " + String((int)lastPM10_0) + " ug/m3");
+    display.println("PM 10: " + String((int)lastPM10_0) + " ug/m3");
     display.display();
   }
   else
   {
     display.setCursor(0, 40);
-    display.println("PM10_0: " + String((int)PM10_0) + " ug/m3");
+    display.println("PM 10: " + String((int)PM10_0) + " ug/m3");
     display.display();
   }
+}
+void displayPMS7003Greater(float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0)
+{
   display.clearDisplay();
-  delay(1000);
+  // delay(1000);
   if (checkBound(RawGreaterThan_0_5, lastRawGreaterThan_0_5, 1.0))
   {
     lastRawGreaterThan_0_5 = RawGreaterThan_0_5;
@@ -1050,9 +1108,8 @@ void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, f
     display.println("GT>10: " + String(RawGreaterThan_10_0) + " ppl/m3");
     display.display();
   }
-  delay(1000);
+  // delay(1000);
 }
-
 void displayLUZ(float light, int light_value, float lux)
 {
   display.clearDisplay();
@@ -1066,7 +1123,7 @@ void displayLUZ(float light, int light_value, float lux)
   display.setCursor(0, 45);
   display.println("Luminance: " + String(lux) + " lux");
   display.display();
-  delay(1000);
+  // delay(1000);
 }
 void displayMQTTerror(int mqtterror)
 {
