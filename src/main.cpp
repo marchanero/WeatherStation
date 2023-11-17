@@ -329,6 +329,7 @@ void setup()
   client.publish(topic, "Hi, I'm WEATHERSTATION ^^");
 
   Serial.println("TEMT6000: OK");
+
   setupAHT10();
   setupAHT20();
   setupBMP280();
@@ -370,19 +371,30 @@ void setup()
       NULL,   /* Task handle. */
       1);     /* Core where the task should run */
 }
+
+int counter = 0;
 void loop2(void *pcParameters)
 {
   while (true)
   {
-    pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-    pixels.show();
-    delay(1000);
-    pixels.setPixelColor(0, pixels.Color(0, 255, 0));
-    pixels.show();
-    delay(1000);
-    pixels.setPixelColor(0, pixels.Color(0, 0, 255));
-    pixels.show();
-    delay(1000);
+    // pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+    // pixels.show();
+    // delay(1000);
+    // pixels.setPixelColor(0, pixels.Color(0, 255, 0));
+    // pixels.show();
+    // delay(1000);
+    // pixels.setPixelColor(0, pixels.Color(0, 0, 255));
+    // pixels.show();
+    // delay(1000);
+    display.clearDisplay();
+    display.setCursor(0, 5);
+    // Display static text
+    display.println("Multitasking");
+    display.setCursor(0, 20);
+    // Display static text
+    display.println(counter);
+    display.display();
+    counter=counter+1;
   }
 }
 
@@ -687,7 +699,7 @@ void loop()
     // use millis to display in oled
     // displayLUZ(light, light_value, lux);
   }
-  delay(1000);
+  //delay(1000);
 }
 
 void reconnect()
