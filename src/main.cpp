@@ -31,8 +31,11 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 //*********************************************** Wifi and MQTT ***********************************************************
 // WiFi
-const char *ssid = "DIGIFIBRA-cF5T";
-const char *password = "P92sKt3FGfsy";
+// const char *ssid = "DIGIFIBRA-cF5T";
+// const char *password = "P92sKt3FGfsy";
+
+const char *ssid = "Armadillo";
+const char *password = "armadillolan";
 
 // MQTT Broker
 const char *mqtt_broker = "192.168.1.43";
@@ -83,6 +86,7 @@ Plantower_PMS7003 pms7003 = Plantower_PMS7003();
 #define POWER_PIN 6
 DFRobot_MICS_ADC mics(/*adcPin*/ ADC_PIN, /*powerPin*/ POWER_PIN);
 
+int a = 0;
 //*************************************************  ENS160  *******************************************************
 // ENS160
 uint8_t csPin = 5;
@@ -95,6 +99,7 @@ void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, f
 void displayPMS7003Greater(float RawGreaterThan_0_5, float RawGreaterThan_1_0, float RawGreaterThan_2_5, float RawGreaterThan_5_0, float RawGreaterThan_10_0);
 void displayMQTTerror(int mqttState);
 void displayLUZ(float light, int light_value, float lux);
+void displayMICS5524(float lastCH4, float lastC2H5OH, float lastH2, float lastNH3, float lastCO, float lastNO2);
 
 void loop2(void *pcParameters);
 
@@ -218,7 +223,7 @@ void setupMICS()
   {
     Serial.println("The sensor is wake up mode");
   }
-  int a = 0;
+
   Serial.println("Please wait until the warm-up time is over!");
   while (!mics.warmUpTime(CALIBRATION_TIME))
   {
@@ -256,6 +261,14 @@ float lastRawGreaterThan_2_5 = 0;
 float lastRawGreaterThan_5_0 = 0;
 float lastRawGreaterThan_10_0 = 0;
 float light = 0;
+
+// MICS5524
+float lastCH4 = 0;
+float lastC2H5OH = 0;
+float lastH2 = 0;
+float lastNH3 = 0;
+float lastCO = 0;
+float lastNO2 = 0;
 
 // Temt6000 light sensor
 int light_value = 0;
@@ -297,6 +310,13 @@ float RawGreaterThan_1_0 = 0;
 float RawGreaterThan_2_5 = 0;
 float RawGreaterThan_5_0 = 0;
 float RawGreaterThan_10_0 = 0;
+
+float newCH4 = 0;
+float newC2H5OH = 0;
+float newH2 = 0;
+float newNH3 = 0;
+float newCO = 0;
+float newNO2 = 0;
 
 //*************************************************  SETUP  *******************************************************
 void setup()
@@ -404,6 +424,25 @@ void setup()
   display.display();
   delay(5000);
 
+  // setupMICS();
+
+  display.clearDisplay();
+  display.setCursor(0, 5);
+  // Display static text
+  display.println("MICS5524: OK");
+  display.setCursor(0, 20);
+  // Display static text
+  display.println("Heating Time: " + String(CALIBRATION_TIME) + "s");
+  display.setCursor(0, 30);
+  delay(2000);
+
+  // while (a < CALIBRATION_TIME)
+  // {
+  //   a = a + 1;
+  //   display.println("Warm-up time: " + String(a) + "s");
+  //   display.display();
+  // }
+
   xTaskCreatePinnedToCore(
       loop2,  /* Function to implement the task */
       "loop", /* Name of the task */
@@ -424,6 +463,7 @@ enum State
   PMS7003,
   PMS7003G,
   TEMT6000,
+  MICS5524
 };
 
 State currentState = AHT10s;
@@ -472,6 +512,10 @@ void loop2(void *pcParameters)
         displayLUZ(light, light_value, lux);
         currentState = AHT10s;
         break;
+      // case MICS5524:
+      //   displayMICS5524(lastCH4, lastC2H5OH, lastH2, lastNH3, lastCO, lastNO2);
+      //   currentState = AHT10s;
+      //   break;
       default:
         break;
       }
@@ -511,6 +555,15 @@ void loop()
   TVOC = ENS160.getTVOC();
   ECO2 = ENS160.getECO2();
 
+  // MICS
+  newCH4 = mics.getGasData(CH4);
+  newC2H5OH = mics.getGasData(C2H5OH);
+  newH2 = mics.getGasData(H2);
+  newNH3 = mics.getGasData(NH3);
+  newCO = mics.getGasData(CO);
+  newNO2 = mics.getGasData(NO2);
+
+  // PMS7003
   PM1_0 = 0;
   PM2_5 = 0;
   PM10_0 = 0;
@@ -538,18 +591,6 @@ void loop()
     RawGreaterThan_2_5 = pms7003.getRawGreaterThan_2_5();
     RawGreaterThan_5_0 = pms7003.getRawGreaterThan_5_0();
     RawGreaterThan_10_0 = pms7003.getRawGreaterThan_10_0();
-
-    lastPM1_0 = PM1_0;
-    lastPM2_5 = PM2_5;
-    lastPM10_0 = PM10_0;
-    lastPM1_0_atmos = PM1_0_atmos;
-    lastPM2_5_atmos = PM2_5_atmos;
-    lastPM10_0_atmos = PM10_0_atmos;
-    lastRawGreaterThan_0_5 = RawGreaterThan_0_5;
-    lastRawGreaterThan_1_0 = RawGreaterThan_1_0;
-    lastRawGreaterThan_2_5 = RawGreaterThan_2_5;
-    lastRawGreaterThan_5_0 = RawGreaterThan_5_0;
-    lastRawGreaterThan_10_0 = RawGreaterThan_10_0;
   }
 
   if (!client.connected())
@@ -777,6 +818,17 @@ void loop()
       Serial.println(msgRawGreaterThan_10_0);
       client.publish("weatherstation/PMS7003/RawGreaterThan_10", msgRawGreaterThan_10_0);
 
+      lastPM1_0 = PM1_0;
+      lastPM2_5 = PM2_5;
+      lastPM10_0 = PM10_0;
+      lastPM1_0_atmos = PM1_0_atmos;
+      lastPM2_5_atmos = PM2_5_atmos;
+      lastPM10_0_atmos = PM10_0_atmos;
+      lastRawGreaterThan_0_5 = RawGreaterThan_0_5;
+      lastRawGreaterThan_1_0 = RawGreaterThan_1_0;
+      lastRawGreaterThan_2_5 = RawGreaterThan_2_5;
+      lastRawGreaterThan_5_0 = RawGreaterThan_5_0;
+      lastRawGreaterThan_10_0 = RawGreaterThan_10_0;
       // displayPMS7003(PM1_0, PM2_5, PM10_0, PM1_0_atmos, PM2_5_atmos, PM10_0_atmos, RawGreaterThan_0_5, RawGreaterThan_1_0, RawGreaterThan_2_5, RawGreaterThan_5_0, RawGreaterThan_10_0);
     }
     else
@@ -786,7 +838,60 @@ void loop()
     // display data in oled
     // use millis to display in oled
     // displayLUZ(light, light_value, lux);
+
+    // Serial.println("********************  MICS5524  **********************");
+    // if (newCH4 > 0 || newC2H5OH > 0 || newH2 > 0 || newNH3 > 0 || newCO > 0 || newNO2 > 0)
+    // {
+    //   pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+    //   pixels.show();
+    //   // MICS5524
+    //   char msgCH4[50];
+    //   snprintf(msgCH4, 50, "%.2f", newCH4);
+    //   Serial.print("CH4 MICS5524: ");
+    //   Serial.println(msgCH4);
+    //   client.publish("weatherstation/MICS5524/CH4", msgCH4);
+    //   lastCH4 = newCH4;
+
+    //   char msgC2H5OH[50];
+    //   snprintf(msgC2H5OH, 50, "%.2f", newC2H5OH);
+    //   Serial.print("C2H5OH MICS5524: ");
+    //   Serial.println(msgC2H5OH);
+    //   client.publish("weatherstation/MICS5524/C2H5OH", msgC2H5OH);
+    //   lastC2H5OH = newC2H5OH;
+
+    //   char msgH2[50];
+    //   snprintf(msgH2, 50, "%.2f", newH2);
+    //   Serial.print("H2 MICS5524: ");
+    //   Serial.println(msgH2);
+    //   client.publish("weatherstation/MICS5524/H2", msgH2);
+    //   lastH2 = newH2;
+
+    //   char msgNH3[50];
+    //   snprintf(msgNH3, 50, "%.2f", newNH3);
+    //   Serial.print("NH3 MICS5524: ");
+    //   Serial.println(msgNH3);
+    //   client.publish("weatherstation/MICS5524/NH3", msgNH3);
+
+    //   char msgCO[50];
+    //   snprintf(msgCO, 50, "%.2f", newCO);
+    //   Serial.print("CO MICS5524: ");
+    //   Serial.println(msgCO);
+    //   client.publish("weatherstation/MICS5524/CO", msgCO);
+    //   lastCO = newCO;
+
+    //   char msgNO2[50];
+    //   snprintf(msgNO2, 50, "%.2f", newNO2);
+    //   Serial.print("NO2 MICS5524: ");
+    //   Serial.println(msgNO2);
+    //   client.publish("weatherstation/MICS5524/NO2", msgNO2);
+    //   lastNO2 = newNO2;
+    // }
+    // else
+    // {
+    //   Serial.println("No hay datos de MICS5524");
+    // }
   }
+
   // delay(1000);
 }
 void reconnect()
@@ -1034,6 +1139,94 @@ void displayENS160(uint8_t Status, uint8_t AQI, uint16_t TVOC, uint16_t ECO2)
     display.display();
   }
   // delay(1000);
+}
+void displayMICS5524(float newCH4, float newC2H5OH, float newH2, float newNH3, float newCO, float newNO2)
+{
+  display.clearDisplay();
+  // display MICS5524 data
+  display.setCursor(0, 5);
+  display.println("MICS5524: ");
+  if (checkBound(newCH4, lastCH4, 1.0))
+  {
+    lastCH4 = newCH4;
+    display.setCursor(0, 20);
+    display.println("CH4: " + String(lastCH4) + " ppm");
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 20);
+    display.println("CH4: " + String(newCH4)) + " ppm";
+    display.display();
+  }
+  if (checkBound(newC2H5OH, lastC2H5OH, 1.0))
+  {
+    lastC2H5OH = newC2H5OH;
+    display.setCursor(0, 30);
+    display.println("C2H5OH: " + String(lastC2H5OH)) + " ppm";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 30);
+    display.println("C2H5OH: " + String(newC2H5OH)) + " ppm";
+    display.display();
+  }
+  if (checkBound(newH2, lastH2, 1.0))
+  {
+    lastH2 = newH2;
+    display.setCursor(0, 40);
+    display.println("H2: " + String(lastH2)) + " ppm";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 40);
+    display.println("H2: " + String(newH2)) + " ppm";
+    display.display();
+  }
+  // delay(1000);
+
+  display.clearDisplay();
+  if (checkBound(newNH3, lastNH3, 1.0))
+  {
+    lastNH3 = newNH3;
+    display.setCursor(0, 10);
+    display.println("NH3: " + String(lastNH3)) + " ppm";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 10);
+    display.println("NH3: " + String(newNH3)) + " ppm";
+    display.display();
+  }
+  if (checkBound(newCO, lastCO, 1.0))
+  {
+    lastCO = newCO;
+    display.setCursor(0, 20);
+    display.println("CO: " + String(lastCO)) + " ppm";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 20);
+    display.println("CO: " + String(newCO)) + " ppm";
+    display.display();
+  }
+  if (checkBound(newNO2, lastNO2, 1.0))
+  {
+    lastNO2 = newNO2;
+    display.setCursor(0, 30);
+    display.println("NO2: " + String(lastNO2)) + " ppm";
+    display.display();
+  }
+  else
+  {
+    display.setCursor(0, 30);
+    display.println("NO2: " + String(newNO2)) + " ppm";
+    display.display();
+  }
 }
 void displayPMS7003(float PM1_0, float PM2_5, float PM10_0, float PM1_0_atmos, float PM2_5_atmos, float PM10_0_atmos)
 {
